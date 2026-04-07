@@ -1,0 +1,18 @@
+services:
+  cross-compile:
+    build:
+      context: .
+      dockerfile: Dockerfile.cross
+    container_name: captive-login-cross-compile
+    volumes:
+      - .:/work
+    working_dir: /work
+    command: >
+      bash -c "
+        mkdir -p build-arm && cd build-arm &&
+        cmake .. -DCMAKE_TOOLCHAIN_FILE=../toolchain-arm.cmake -DCURL_INCLUDE_DIR=/usr/include -DCURL_LIBRARY=/usr/lib/arm-linux-gnueabihf/libcurl.so &&
+        make &&
+        echo '' &&
+        echo 'Build complete! ARM binary: ./build-arm/captive-login' &&
+        echo 'Copy to Pi: scp build-arm/captive-login pi@YOUR_PI_IP:/home/pi/'
+      "

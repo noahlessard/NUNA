@@ -1,0 +1,7 @@
+captive-login/build/
+captive-login/build-arm/
+captive-login/captive-login
+
+# Debug dumps (written to cwd on parse failure in older builds)
+confirmation_page.html
+weblogin_page.html

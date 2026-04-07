@@ -1,0 +1,22 @@
+FROM ubuntu:20.04
+
+ENV DEBIAN_FRONTEND=noninteractive
+
+# Restrict default sources to amd64, then add ports.ubuntu.com for armhf
+# (archive.ubuntu.com does not host armhf — that lives on ports.ubuntu.com)
+RUN sed -i 's/^deb /deb [arch=amd64] /' /etc/apt/sources.list && \
+    dpkg --add-architecture armhf && \
+    echo "deb [arch=armhf] http://ports.ubuntu.com/ubuntu-ports focal main restricted universe multiverse" >> /etc/apt/sources.list && \
+    echo "deb [arch=armhf] http://ports.ubuntu.com/ubuntu-ports focal-updates main restricted universe multiverse" >> /etc/apt/sources.list && \
+    echo "deb [arch=armhf] http://ports.ubuntu.com/ubuntu-ports focal-security main restricted universe multiverse" >> /etc/apt/sources.list
+
+# Install the ARM cross-compiler and ARM curl dev libraries
+RUN apt-get update && apt-get install -y --no-install-recommends \
+    cmake \
+    make \
+    gcc-arm-linux-gnueabihf \
+    g++-arm-linux-gnueabihf \
+    libcurl4-openssl-dev:armhf \
+    && rm -rf /var/lib/apt/lists/*
+
+WORKDIR /work
