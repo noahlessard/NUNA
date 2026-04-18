@@ -7,6 +7,10 @@
 #include <iomanip>
 #include <sstream>
 #include <random>
+#include <cstdlib>
+#include <sys/types.h>
+#include <unistd.h>
+#include <fstream>
 #include "config.h"
 
 // RAII wrapper for curl easy handle
@@ -61,6 +65,51 @@ static std::string originOf(const char* url) {
     std::string s(url);
     size_t slash = s.find('/', s.find("//") + 2);
     return slash != std::string::npos ? s.substr(0, slash) : s;
+}
+
+// Run a shell command and return its exit code
+static int runCommand(const std::string& cmd) {
+    LOG("Running: " << cmd);
+    return std::system(cmd.c_str());
+}
+
+// Reset the WiFi connection when auth fails repeatedly
+static void resetNetwork() {
+    LOG("=== Network reset triggered (" << MAX_AUTH_FAILURES << " consecutive auth failures) ===");
+
+    // 1. Disconnect from UW-NET
+    runCommand("nmcli connection down \"" WIFI_SSID "\" 2>/dev/null");
+    std::this_thread::sleep_for(std::chrono::seconds(3));
+
+    // 2. Forget the connection profile
+    runCommand("nmcli connection delete \"" WIFI_SSID "\" 2>/dev/null");
+    std::this_thread::sleep_for(std::chrono::seconds(2));
+
+    // 3. Generate a random MAC address (AA:BB:CC:DD:EE:FF format)
+    {
+        static const char hex[] = "0123456789ABCDEF";
+        static std::mt19937 rng(std::chrono::steady_clock::now().time_since_epoch().count());
+        std::uniform_int_distribution<int> dist(0, 15);
+        std::string mac;
+        for (int i = 0; i < 6; i++) {
+            if (i > 0) mac += ":";
+            mac += hex[dist(rng)];
+            mac += hex[dist(rng)];
+        }
+        LOG("Setting random MAC: " << mac);
+        runCommand("ip link set dev wlan0 address " + mac);
+    }
+    std::this_thread::sleep_for(std::chrono::seconds(2));
+
+    // 4. Bring the interface up
+    runCommand("ip link set dev wlan0 up");
+    std::this_thread::sleep_for(std::chrono::seconds(2));
+
+    // 5. Reconnect to UW-NET
+    runCommand("nmcli connection up \"" WIFI_SSID "\" 2>/dev/null");
+    std::this_thread::sleep_for(std::chrono::seconds(10));
+
+    LOG("=== Network reset complete ===");
 }
 
 std::string generateRandomString(size_t length) {
@@ -157,10 +206,13 @@ int main() {
 
     LOG("Captive Portal Auto-Login started");
 
+    int consecutive_failures = 0;
+
     while (true) {
         if (checkConnectivity()) {
             LOG("Connected to internet");
-            std::this_thread::sleep_for(std::chrono::seconds(5));
+            consecutive_failures = 0;
+            std::this_thread::sleep_for(std::chrono::seconds(CHECK_INTERVAL_SECONDS));
             continue;
         }
 
@@ -176,7 +228,8 @@ int main() {
 
         if (curl_easy_perform(init_handle.get()) != CURLE_OK) {
             LOG("Failed to initialize session");
-            std::this_thread::sleep_for(std::chrono::seconds(5));
+            consecutive_failures++;
+            std::this_thread::sleep_for(std::chrono::seconds(CHECK_INTERVAL_SECONDS));
             continue;
         }
 
@@ -212,7 +265,8 @@ int main() {
         CURLcode res = curl_easy_perform(login_handle.get());
         if (res != CURLE_OK) {
             LOG("Registration POST failed: " << curl_easy_strerror(res));
-            std::this_thread::sleep_for(std::chrono::seconds(5));
+            consecutive_failures++;
+            std::this_thread::sleep_for(std::chrono::seconds(CHECK_INTERVAL_SECONDS));
             continue;
         }
 
@@ -220,7 +274,8 @@ int main() {
         curl_easy_getinfo(login_handle.get(), CURLINFO_RESPONSE_CODE, &code);
         if (code != 302) {
             LOG("Registration failed, expected 302 but got: " << code);
-            std::this_thread::sleep_for(std::chrono::seconds(5));
+            consecutive_failures++;
+            std::this_thread::sleep_for(std::chrono::seconds(CHECK_INTERVAL_SECONDS));
             continue;
         }
 
@@ -229,7 +284,8 @@ int main() {
         curl_easy_getinfo(login_handle.get(), CURLINFO_REDIRECT_URL, &redir_raw);
         if (!redir_raw) {
             LOG("No redirect URL in 302 response");
-            std::this_thread::sleep_for(std::chrono::seconds(5));
+            consecutive_failures++;
+            std::this_thread::sleep_for(std::chrono::seconds(CHECK_INTERVAL_SECONDS));
             continue;
         }
         std::string redir_url(redir_raw);
@@ -247,14 +303,16 @@ int main() {
 
         if (curl_easy_perform(confirm_handle.get()) != CURLE_OK) {
             LOG("Confirmation page fetch failed");
-            std::this_thread::sleep_for(std::chrono::seconds(5));
+            consecutive_failures++;
+            std::this_thread::sleep_for(std::chrono::seconds(CHECK_INTERVAL_SECONDS));
             continue;
         }
         LOG("Confirmation page received (" << confirm_html.size() << " bytes)");
 
         std::string username, password;
         if (!extractLoginCredentials(confirm_html, username, password)) {
-            std::this_thread::sleep_for(std::chrono::seconds(5));
+            consecutive_failures++;
+            std::this_thread::sleep_for(std::chrono::seconds(CHECK_INTERVAL_SECONDS));
             continue;
         }
         LOG("Extracted username: " << username);
@@ -286,7 +344,8 @@ int main() {
 
         if (curl_easy_perform(receipt_handle.get()) != CURLE_OK) {
             LOG("Receipt POST failed");
-            std::this_thread::sleep_for(std::chrono::seconds(5));
+            consecutive_failures++;
+            std::this_thread::sleep_for(std::chrono::seconds(CHECK_INTERVAL_SECONDS));
             continue;
         }
         LOG("Weblogin page received (" << weblogin_html.size() << " bytes)");
@@ -300,7 +359,8 @@ int main() {
             LOG("Failed to extract weblogin credentials, dumping to /tmp/captive-weblogin.html");
             FILE* f = fopen("/tmp/captive-weblogin.html", "wb");
             if (f) { fwrite(weblogin_html.c_str(), 1, weblogin_html.size(), f); fclose(f); }
-            std::this_thread::sleep_for(std::chrono::seconds(5));
+            consecutive_failures++;
+            std::this_thread::sleep_for(std::chrono::seconds(CHECK_INTERVAL_SECONDS));
             continue;
         }
 
@@ -330,12 +390,20 @@ int main() {
         res = curl_easy_perform(auth_handle.get());
         if (res != CURLE_OK) {
             LOG("Authentication POST failed: " << curl_easy_strerror(res));
+            consecutive_failures++;
         } else {
             curl_easy_getinfo(auth_handle.get(), CURLINFO_RESPONSE_CODE, &code);
             LOG("Authentication completed with response code: " << code);
+            consecutive_failures = 0;
         }
 
-        std::this_thread::sleep_for(std::chrono::seconds(5));
+        if (consecutive_failures >= MAX_AUTH_FAILURES) {
+            LOG("Auth failed " << consecutive_failures << " times in a row — resetting network");
+            resetNetwork();
+            consecutive_failures = 0;
+        }
+
+        std::this_thread::sleep_for(std::chrono::seconds(CHECK_INTERVAL_SECONDS));
     }
 
     return 0;
