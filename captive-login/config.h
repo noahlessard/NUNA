@@ -10,4 +10,4 @@
 #define MAX_AUTH_FAILURES      3
 
 // UW-NET profile name (match nmcli connection name)
-#define WIFI_SSID "UW-NET"
+#define WIFI_SSID "UWNET"

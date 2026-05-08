@@ -226,8 +226,9 @@ int main() {
         curl_easy_setopt(init_handle.get(), CURLOPT_COOKIEFILE,    "");
         curl_easy_setopt(init_handle.get(), CURLOPT_WRITEFUNCTION, discardBody);
 
-        if (curl_easy_perform(init_handle.get()) != CURLE_OK) {
-            LOG("Failed to initialize session");
+        CURLcode init_res = curl_easy_perform(init_handle.get());
+        if (init_res != CURLE_OK) {
+            LOG("Failed to initialize session: " << curl_easy_strerror(init_res));
             consecutive_failures++;
             std::this_thread::sleep_for(std::chrono::seconds(CHECK_INTERVAL_SECONDS));
             continue;
