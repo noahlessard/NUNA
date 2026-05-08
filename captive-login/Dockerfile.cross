@@ -10,13 +10,17 @@ RUN sed -i 's/^deb /deb [arch=amd64] /' /etc/apt/sources.list && \
     echo "deb [arch=armhf] http://ports.ubuntu.com/ubuntu-ports focal-updates main restricted universe multiverse" >> /etc/apt/sources.list && \
     echo "deb [arch=armhf] http://ports.ubuntu.com/ubuntu-ports focal-security main restricted universe multiverse" >> /etc/apt/sources.list
 
-# Install cross-compiler and static OpenSSL/zlib for armhf
+# Install cross-compiler and static OpenSSL/zlib/c-ares for armhf.
+# c-ares is required so curl can resolve hostnames without going through
+# glibc's NSS (which dlopen's nss_dns.so at runtime and breaks fully-static
+# binaries — see --enable-ares in the curl configure step below).
 RUN apt-get update && apt-get install -y --no-install-recommends \
     cmake make wget ca-certificates \
     gcc-arm-linux-gnueabihf \
     g++-arm-linux-gnueabihf \
     libssl-dev:armhf \
     zlib1g-dev:armhf \
+    libc-ares-dev:armhf \
     && rm -rf /var/lib/apt/lists/*
 
 # Build a minimal static libcurl from source (no GSSAPI, no PSL, no IDN,
@@ -39,6 +43,7 @@ RUN wget -q https://curl.se/download/curl-${CURL_VERSION}.tar.gz && \
         --disable-tftp --disable-pop3 \
         --disable-imap --disable-smtp \
         --disable-gopher \
+        --enable-ares \
         --without-brotli \
         --without-nghttp2 \
         --without-libssh2 \
