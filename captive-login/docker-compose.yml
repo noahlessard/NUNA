@@ -10,7 +10,7 @@ services:
     command: >
       bash -c "
         mkdir -p build-arm && cd build-arm &&
-        cmake .. -DCMAKE_TOOLCHAIN_FILE=../toolchain-arm.cmake -DCURL_INCLUDE_DIR=/usr/include -DCURL_LIBRARY=/usr/lib/arm-linux-gnueabihf/libcurl.so &&
+        cmake .. -DCMAKE_TOOLCHAIN_FILE=../toolchain-arm.cmake -DCURL_INCLUDE_DIR=/opt/curl-arm/include -DCURL_LIBRARY=/opt/curl-arm/lib/libcurl.a &&
         make &&
         echo '' &&
         echo 'Build complete! ARM binary: ./build-arm/captive-login' &&

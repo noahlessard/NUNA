@@ -10,13 +10,47 @@ RUN sed -i 's/^deb /deb [arch=amd64] /' /etc/apt/sources.list && \
     echo "deb [arch=armhf] http://ports.ubuntu.com/ubuntu-ports focal-updates main restricted universe multiverse" >> /etc/apt/sources.list && \
     echo "deb [arch=armhf] http://ports.ubuntu.com/ubuntu-ports focal-security main restricted universe multiverse" >> /etc/apt/sources.list
 
-# Install the ARM cross-compiler and ARM curl dev libraries
+# Install cross-compiler and static OpenSSL/zlib for armhf
 RUN apt-get update && apt-get install -y --no-install-recommends \
-    cmake \
-    make \
+    cmake make wget ca-certificates \
     gcc-arm-linux-gnueabihf \
     g++-arm-linux-gnueabihf \
-    libcurl4-openssl-dev:armhf \
+    libssl-dev:armhf \
+    zlib1g-dev:armhf \
     && rm -rf /var/lib/apt/lists/*
+
+# Build a minimal static libcurl from source (no GSSAPI, no PSL, no IDN,
+# HTTPS only) to avoid the transitive Kerberos/libidn2 dependency chain
+# that Ubuntu's pre-built libcurl.a carries.
+ARG CURL_VERSION=7.88.1
+RUN wget -q https://curl.se/download/curl-${CURL_VERSION}.tar.gz && \
+    tar xf curl-${CURL_VERSION}.tar.gz && \
+    cd curl-${CURL_VERSION} && \
+    ./configure \
+        --host=arm-linux-gnueabihf \
+        --prefix=/opt/curl-arm \
+        --disable-shared --enable-static \
+        --without-gssapi \
+        --without-gnutls \
+        --with-openssl \
+        --disable-ldap --disable-ldaps \
+        --disable-rtsp --disable-ftp \
+        --disable-dict --disable-telnet \
+        --disable-tftp --disable-pop3 \
+        --disable-imap --disable-smtp \
+        --disable-gopher \
+        --without-brotli \
+        --without-nghttp2 \
+        --without-libssh2 \
+        --without-librtmp \
+        --without-libidn2 \
+        --without-libpsl \
+        CC=arm-linux-gnueabihf-gcc \
+        CPPFLAGS="-I/usr/include -I/usr/include/arm-linux-gnueabihf" \
+        LDFLAGS="-L/usr/lib/arm-linux-gnueabihf" \
+        PKG_CONFIG_PATH="/usr/lib/arm-linux-gnueabihf/pkgconfig" \
+        PKG_CONFIG_LIBDIR="/usr/lib/arm-linux-gnueabihf/pkgconfig" && \
+    make -j$(nproc) && make install && \
+    cd / && rm -rf curl-${CURL_VERSION} curl-${CURL_VERSION}.tar.gz
 
 WORKDIR /work
